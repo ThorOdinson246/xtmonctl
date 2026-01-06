@@ -4,14 +4,18 @@ use crate::app::App;
 use crate::error::Result;
 use crate::units::BrightnessPercent;
 
-#[derive(Debug, Parser)]
-#[command(name = "xtmonctl", version, about = "External monitor brightness control via ddcutil")]
+#[derive(Debug, Clone, Parser)]
+#[command(
+    name = "xtmonctl",
+    version,
+    about = "External monitor brightness control via ddcutil"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum Commands {
     List,
     Get { monitor: String },
@@ -21,7 +25,7 @@ pub enum Commands {
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
-    let app = App::default();
+    let app = App::load()?;
 
     match cli.command {
         None => crate::tui::run(&app),
@@ -41,7 +45,11 @@ fn list_monitors(app: &App) -> Result<()> {
 
     for monitor in monitors {
         let brightness = app.get_monitor_brightness(&monitor).ok();
-        println!("{}: {}", monitor.id.display_number, monitor.display_name());
+        println!(
+            "{}: {}",
+            monitor.id.display_number,
+            app.display_label(&monitor)
+        );
         println!("   Bus: {}", monitor.id.bus_name());
         if let Some(brightness) = brightness {
             println!(
@@ -77,7 +85,7 @@ fn set_brightness(app: &App, identifier: &str, value: &str) -> Result<()> {
     app.set_monitor_brightness(monitor, target)?;
     println!(
         "Set {} brightness to {}%",
-        monitor.display_name(),
+        app.display_label(monitor),
         target.value()
     );
     Ok(())
@@ -93,7 +101,7 @@ fn set_all_brightness(app: &App, value: &str) -> Result<()> {
     for monitor in &monitors {
         let target = parse_target_percent(app, monitor, value)?;
         app.set_monitor_brightness(monitor, target)?;
-        println!("Set {} to {}%", monitor.display_name(), target.value());
+        println!("Set {} to {}%", app.display_label(monitor), target.value());
     }
 
     Ok(())
