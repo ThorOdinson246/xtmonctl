@@ -1,4 +1,6 @@
 fn main() {
-    eprintln!("xtmonctl is not ready yet");
+    if let Err(error) = xtmonctl::cli::run() {
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
 }
-
