@@ -45,7 +45,8 @@ impl BrightnessRaw {
     }
 
     pub fn to_percent(self) -> BrightnessPercent {
-        let scaled = ((u32::from(self.value) * 100) + (u32::from(self.max) / 2)) / u32::from(self.max);
+        let scaled =
+            ((u32::from(self.value) * 100) + (u32::from(self.max) / 2)) / u32::from(self.max);
         BrightnessPercent(scaled.min(100) as u8)
     }
 }

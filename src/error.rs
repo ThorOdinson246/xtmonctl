@@ -24,6 +24,8 @@ pub enum XtmonctlError {
     ConfigFormat { path: PathBuf, message: String },
     #[error("invalid brightness value: {0}")]
     InvalidBrightness(String),
+    #[error("internal state error: {0}")]
+    State(String),
     #[error("command failed: {command}: {message}")]
     CommandFailed { command: String, message: String },
 }
