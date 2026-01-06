@@ -11,6 +11,9 @@ pub fn version() -> &'static str {
 }
 
 pub use app::{find_monitor, App};
-pub use ddc::{detect_monitors, get_brightness_raw, set_brightness_percent, set_brightness_raw, ConnectorType, MonitorId, MonitorInfo};
+pub use ddc::{
+    detect_monitors, get_brightness_raw, parse_detect_output, parse_getvcp_output,
+    set_brightness_percent, set_brightness_raw, ConnectorType, MonitorId, MonitorInfo,
+};
 pub use error::{Result, XtmonctlError};
 pub use units::{BrightnessPercent, BrightnessRaw};

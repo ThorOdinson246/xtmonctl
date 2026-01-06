@@ -1,34 +1,22 @@
-use std::process::Command;
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::ddc::detect::run_ddcutil;
 use crate::ddc::types::MonitorInfo;
 use crate::error::{Result, XtmonctlError};
 use crate::units::{BrightnessPercent, BrightnessRaw};
 
-pub fn get_brightness_raw(monitor: &MonitorInfo, _timeout: Duration) -> Result<BrightnessRaw> {
-    let output = Command::new("ddcutil")
-        .args([
+pub fn get_brightness_raw(monitor: &MonitorInfo, timeout: Duration) -> Result<BrightnessRaw> {
+    let output = run_ddcutil(
+        [
             "getvcp",
             "10",
             "--bus",
             &monitor.id.i2c_bus.to_string(),
             "--brief",
-        ])
-        .output();
-
-    let output = match output {
-        Ok(output) => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(XtmonctlError::DdcutilNotFound);
-        }
-        Err(error) => {
-            return Err(XtmonctlError::CommandFailed {
-                command: format!("ddcutil getvcp 10 --bus {}", monitor.id.i2c_bus),
-                message: error.to_string(),
-            });
-        }
-    };
+        ],
+        timeout,
+    )?;
 
     if !output.status.success() {
         return classify_ddc_error(
@@ -44,34 +32,25 @@ pub fn get_brightness_raw(monitor: &MonitorInfo, _timeout: Duration) -> Result<B
 pub fn set_brightness_raw(
     monitor: &MonitorInfo,
     brightness: BrightnessRaw,
-    _timeout: Duration,
+    timeout: Duration,
 ) -> Result<()> {
-    let output = Command::new("ddcutil")
-        .args([
+    let output = run_ddcutil(
+        [
             "setvcp",
             "10",
             &brightness.value.to_string(),
             "--bus",
             &monitor.id.i2c_bus.to_string(),
-        ])
-        .output();
-
-    let output = match output {
-        Ok(output) => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(XtmonctlError::DdcutilNotFound);
-        }
-        Err(error) => {
-            return Err(XtmonctlError::CommandFailed {
-                command: format!("ddcutil setvcp 10 {} --bus {}", brightness.value, monitor.id.i2c_bus),
-                message: error.to_string(),
-            });
-        }
-    };
+        ],
+        timeout,
+    )?;
 
     if !output.status.success() {
         return classify_ddc_error(
-            format!("ddcutil setvcp 10 {} --bus {}", brightness.value, monitor.id.i2c_bus),
+            format!(
+                "ddcutil setvcp 10 {} --bus {}",
+                brightness.value, monitor.id.i2c_bus
+            ),
             &String::from_utf8_lossy(&output.stderr),
             monitor,
         );
