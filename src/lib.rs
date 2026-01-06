@@ -11,6 +11,7 @@ pub fn version() -> &'static str {
 }
 
 pub use app::{find_monitor, App};
+pub use cli::{Cli, Commands};
 pub use ddc::{
     detect_monitors, get_brightness_raw, parse_detect_output, parse_getvcp_output,
     set_brightness_percent, set_brightness_raw, ConnectorType, MonitorId, MonitorInfo,

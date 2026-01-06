@@ -23,7 +23,7 @@ fn invalid_subcommand_fails() {
 #[test]
 fn set_command_is_parsed() {
     use clap::Parser;
-    use xtmonctl::cli::{Cli, Commands};
+    use xtmonctl::{Cli, Commands};
 
     let cli = Cli::parse_from(["xtmonctl", "set", "1", "+10"]);
     match cli.command {
