@@ -6,3 +6,4 @@ description = "External monitor brightness control via ddcutil"
 license = "MIT"
 
 [dependencies]
+thiserror = "2.0"
