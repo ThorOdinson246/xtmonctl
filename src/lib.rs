@@ -9,3 +9,8 @@ pub mod units;
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+pub use app::{find_monitor, App};
+pub use ddc::{detect_monitors, get_brightness_raw, set_brightness_percent, set_brightness_raw, ConnectorType, MonitorId, MonitorInfo};
+pub use error::{Result, XtmonctlError};
+pub use units::{BrightnessPercent, BrightnessRaw};
