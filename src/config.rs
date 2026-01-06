@@ -82,7 +82,9 @@ impl Config {
     }
 
     pub fn alias_for(&self, bus_name: &str) -> Option<&str> {
-        self.monitors.get(bus_name).and_then(|entry| entry.alias.as_deref())
+        self.monitors
+            .get(bus_name)
+            .and_then(|entry| entry.alias.as_deref())
     }
 
     pub fn last_brightness_for(&self, bus_name: &str) -> Option<u8> {
