@@ -6,4 +6,10 @@ description = "External monitor brightness control via ddcutil"
 license = "MIT"
 
 [dependencies]
+dirs = "6.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.13"
