@@ -10,22 +10,14 @@ pub fn parse_detect_output(output: &str) -> Result<Vec<MonitorInfo>> {
         let stripped = line.trim();
 
         if let Some(display_number) = parse_display_start(stripped) {
-            if let Some(builder) = current.take() {
-                if is_valid_display {
-                    monitors.push(builder.build()?);
-                }
-            }
+            push_if_complete(&mut monitors, current.take(), is_valid_display);
             current = Some(MonitorBuilder::new(display_number));
             is_valid_display = true;
             continue;
         }
 
         if stripped == "Invalid display" {
-            if let Some(builder) = current.take() {
-                if is_valid_display {
-                    monitors.push(builder.build()?);
-                }
-            }
+            push_if_complete(&mut monitors, current.take(), is_valid_display);
             is_valid_display = false;
             continue;
         }
@@ -39,13 +31,23 @@ pub fn parse_detect_output(output: &str) -> Result<Vec<MonitorInfo>> {
         }
     }
 
-    if let Some(builder) = current {
-        if is_valid_display {
-            monitors.push(builder.build()?);
-        }
-    }
+    push_if_complete(&mut monitors, current, is_valid_display);
 
     Ok(monitors)
+}
+
+fn push_if_complete(
+    monitors: &mut Vec<MonitorInfo>,
+    builder: Option<MonitorBuilder>,
+    is_valid_display: bool,
+) {
+    if let Some(builder) = builder {
+        if is_valid_display {
+            if let Ok(monitor) = builder.build() {
+                monitors.push(monitor);
+            }
+        }
+    }
 }
 
 fn parse_display_start(line: &str) -> Option<u32> {
@@ -116,9 +118,12 @@ impl MonitorBuilder {
     }
 
     fn build(self) -> Result<MonitorInfo> {
-        let i2c_bus = self
-            .i2c_bus
-            .ok_or_else(|| XtmonctlError::ParseError("missing i2c bus in detect output".into()))?;
+        let i2c_bus = self.i2c_bus.ok_or_else(|| {
+            XtmonctlError::ParseError(format!(
+                "missing i2c bus in detect output for display {}",
+                self.display_number
+            ))
+        })?;
 
         Ok(MonitorInfo {
             id: MonitorId {
