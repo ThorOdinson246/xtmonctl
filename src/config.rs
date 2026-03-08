@@ -93,6 +93,16 @@ impl Config {
             .and_then(|entry| entry.last_brightness_percent)
     }
 
+    pub fn aliases(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.monitors.iter().filter_map(|(bus_name, entry)| {
+            entry
+                .alias
+                .as_deref()
+                .filter(|alias| !alias.trim().is_empty())
+                .map(|alias| (bus_name.as_str(), alias))
+        })
+    }
+
     pub fn set_last_brightness(&mut self, bus_name: &str, percent: u8) {
         let entry = self
             .monitors

@@ -47,7 +47,7 @@ impl App {
         monitors: &'a [MonitorInfo],
         identifier: &str,
     ) -> Result<&'a MonitorInfo> {
-        find_monitor(monitors, identifier)
+        self.find_monitor_with_aliases(monitors, identifier)
     }
 
     pub fn get_monitor_brightness(
@@ -82,6 +82,39 @@ impl App {
         Ok(results)
     }
 
+    pub fn resolve_target_percent(
+        &self,
+        monitor: &MonitorInfo,
+        value: &str,
+    ) -> Result<BrightnessPercent> {
+        if value.starts_with('+') || value.starts_with('-') {
+            let delta = value
+                .parse::<i16>()
+                .map_err(|_| XtmonctlError::InvalidBrightness(value.to_string()))?;
+            let current = self.get_monitor_brightness(monitor)?.to_percent();
+            Ok(current.saturating_add(delta))
+        } else {
+            let percent = value
+                .parse::<u8>()
+                .map_err(|_| XtmonctlError::InvalidBrightness(value.to_string()))?;
+            BrightnessPercent::new(percent)
+        }
+    }
+
+    pub fn set_all_from_value(
+        &self,
+        value: &str,
+    ) -> Result<Vec<(MonitorInfo, crate::units::BrightnessRaw, BrightnessPercent)>> {
+        let monitors = self.list_monitors()?;
+        let mut results = Vec::with_capacity(monitors.len());
+        for monitor in monitors {
+            let target = self.resolve_target_percent(&monitor, value)?;
+            let raw = self.set_monitor_brightness(&monitor, target)?;
+            results.push((monitor, raw, target));
+        }
+        Ok(results)
+    }
+
     pub fn alias_for(&self, monitor: &MonitorInfo) -> Option<String> {
         self.config
             .lock()
@@ -94,6 +127,14 @@ impl App {
             .lock()
             .ok()
             .and_then(|config| config.last_brightness_for(&monitor.id.bus_name()))
+    }
+
+    pub fn last_brightness_for_bus(&self, bus: u32) -> Option<BrightnessPercent> {
+        self.config
+            .lock()
+            .ok()
+            .and_then(|config| config.last_brightness_for(&format!("i2c-{bus}")))
+            .and_then(|value| BrightnessPercent::new(value).ok())
     }
 
     pub fn display_label(&self, monitor: &MonitorInfo) -> String {
@@ -125,6 +166,38 @@ impl App {
         self.config
             .lock()
             .map_err(|_| XtmonctlError::State("configuration lock poisoned".into()))
+    }
+
+    fn find_monitor_with_aliases<'a>(
+        &self,
+        monitors: &'a [MonitorInfo],
+        identifier: &str,
+    ) -> Result<&'a MonitorInfo> {
+        let trimmed = identifier.trim();
+        let lowered = trimmed.to_ascii_lowercase();
+
+        if let Ok(config) = self.config.lock() {
+            let alias_matches = config
+                .aliases()
+                .filter(|(_, alias)| alias.to_ascii_lowercase().contains(&lowered))
+                .filter_map(|(bus_name, _)| {
+                    let bus = bus_name.strip_prefix("i2c-")?.parse::<u32>().ok()?;
+                    monitors.iter().find(|monitor| monitor.id.i2c_bus == bus)
+                })
+                .collect::<Vec<_>>();
+
+            match alias_matches.as_slice() {
+                [single] => return Ok(*single),
+                [] => {}
+                _ => {
+                    return Err(XtmonctlError::MonitorNotFound(format!(
+                        "{trimmed} (multiple alias matches)"
+                    )));
+                }
+            }
+        }
+
+        find_monitor(monitors, trimmed)
     }
 }
 
