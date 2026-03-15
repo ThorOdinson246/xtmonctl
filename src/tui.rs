@@ -12,7 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap};
 use ratatui::Terminal;
 
 use crate::app::App;
@@ -38,7 +38,11 @@ pub fn run(app: &App) -> Result<()> {
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) -> Result<()> {
     let (tx, rx) = mpsc::channel();
-    let mut state = TuiState::default();
+    let mut state = TuiState {
+        loading: true,
+        message: "Refreshing monitors...".into(),
+        ..TuiState::default()
+    };
     request_refresh(app.clone(), tx.clone());
 
     loop {
@@ -49,10 +53,15 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                     .direction(Direction::Vertical)
                     .constraints([
                         Constraint::Min(8),
-                        Constraint::Length(4),
-                        Constraint::Length(2),
+                        Constraint::Length(5),
+                        Constraint::Length(3),
                     ])
                     .split(frame.area());
+
+                let detail_chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .split(chunks[1]);
 
                 let items = state
                     .monitors
@@ -66,12 +75,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                         } else {
                             Style::default()
                         };
-                        let details = match state.brightness.get(&monitor.id.i2c_bus) {
-                            Some(raw) => {
-                                format!("{}% ({}/{})", raw.to_percent().value(), raw.value, raw.max)
-                            }
-                            None => "loading".to_string(),
-                        };
+                        let details = state.row_status(monitor.id.i2c_bus);
                         ListItem::new(Line::from(vec![Span::styled(
                             format!(
                                 "{} ({}) - {}",
@@ -91,14 +95,10 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                 let detail_text = selected_detail(&state);
                 let detail = Paragraph::new(detail_text)
                     .block(Block::default().title("Selected").borders(Borders::ALL));
-                frame.render_widget(detail, chunks[1]);
+                frame.render_widget(detail, detail_chunks[0]);
 
-                let help =
-                    Paragraph::new(state.help_text()).block(Block::default().borders(Borders::ALL));
-                frame.render_widget(help, chunks[2]);
-
-                if let Some(raw) = state.selected_brightness() {
-                    let gauge = Gauge::default()
+                let gauge = match state.selected_brightness() {
+                    Some(raw) => Gauge::default()
                         .block(Block::default().title("Brightness").borders(Borders::ALL))
                         .gauge_style(Style::default().fg(Color::Cyan))
                         .percent(raw.to_percent().value() as u16)
@@ -107,9 +107,19 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                             raw.to_percent().value(),
                             raw.value,
                             raw.max
-                        ));
-                    frame.render_widget(gauge, chunks[1]);
-                }
+                        )),
+                    None => Gauge::default()
+                        .block(Block::default().title("Brightness").borders(Borders::ALL))
+                        .gauge_style(Style::default().fg(Color::DarkGray))
+                        .percent(0)
+                        .label("Unavailable"),
+                };
+                frame.render_widget(gauge, detail_chunks[1]);
+
+                let help = Paragraph::new(state.help_text())
+                    .block(Block::default().title("Status").borders(Borders::ALL))
+                    .wrap(Wrap { trim: true });
+                frame.render_widget(help, chunks[2]);
             })
             .map_err(io_error)?;
 
@@ -124,7 +134,11 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
             match key.code {
                 KeyCode::Char('q') => return Ok(()),
                 KeyCode::Char('?') => state.show_help = !state.show_help,
-                KeyCode::Char('r') => request_refresh(app.clone(), tx.clone()),
+                KeyCode::Char('r') => {
+                    state.loading = true;
+                    state.message = "Refreshing monitors...".into();
+                    request_refresh(app.clone(), tx.clone());
+                }
                 KeyCode::Char('j') | KeyCode::Down if !state.monitors.is_empty() => {
                     state.selected = (state.selected + 1) % state.monitors.len();
                 }
@@ -135,25 +149,25 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                 KeyCode::Char('h') | KeyCode::Left => request_adjust(
                     app.clone(),
                     tx.clone(),
-                    &state,
+                    &mut state,
                     -(app.default_step_percent() as i16),
                 ),
                 KeyCode::Char('l') | KeyCode::Right => request_adjust(
                     app.clone(),
                     tx.clone(),
-                    &state,
+                    &mut state,
                     app.default_step_percent() as i16,
                 ),
                 KeyCode::Char('H') => request_adjust(
                     app.clone(),
                     tx.clone(),
-                    &state,
+                    &mut state,
                     -(app.large_step_percent() as i16),
                 ),
                 KeyCode::Char('L') => request_adjust(
                     app.clone(),
                     tx.clone(),
-                    &state,
+                    &mut state,
                     app.large_step_percent() as i16,
                 ),
                 KeyCode::Char(digit) if digit.is_ascii_digit() => {
@@ -162,7 +176,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                     } else {
                         digit.to_digit(10).unwrap_or(0) as u8 * 10
                     };
-                    request_set(app.clone(), tx.clone(), &state, value);
+                    request_set(app.clone(), tx.clone(), &mut state, value);
                 }
                 _ => {}
             }
@@ -188,9 +202,11 @@ struct MonitorRow {
 struct TuiState {
     monitors: Vec<MonitorRow>,
     brightness: std::collections::HashMap<u32, crate::units::BrightnessRaw>,
+    brightness_errors: std::collections::HashMap<u32, String>,
     selected: usize,
     message: String,
     show_help: bool,
+    loading: bool,
 }
 
 impl TuiState {
@@ -206,10 +222,22 @@ impl TuiState {
     fn help_text(&self) -> String {
         if self.show_help {
             "j/k or arrows: select  h/l: adjust  H/L: large adjust  0-9: preset  r: refresh  q: quit".into()
+        } else if self.loading {
+            "Refreshing monitors...".into()
         } else if self.message.is_empty() {
             "Press ? for help".into()
         } else {
             self.message.clone()
+        }
+    }
+
+    fn row_status(&self, bus: u32) -> String {
+        if let Some(raw) = self.brightness.get(&bus) {
+            format!("{}% ({}/{})", raw.to_percent().value(), raw.value, raw.max)
+        } else if let Some(error) = self.brightness_errors.get(&bus) {
+            format!("ERR: {error}")
+        } else {
+            "loading".to_string()
         }
     }
 }
@@ -218,6 +246,7 @@ enum UiMessage {
     Refreshed {
         monitors: Vec<MonitorRow>,
         brightness: Vec<(u32, crate::units::BrightnessRaw)>,
+        brightness_errors: Vec<(u32, String)>,
         message: String,
     },
     Updated {
@@ -248,12 +277,15 @@ fn handle_messages(state: &mut TuiState, rx: &Receiver<UiMessage>) {
             UiMessage::Refreshed {
                 monitors,
                 brightness,
+                brightness_errors,
                 message,
             } => {
                 state.monitors = monitors;
                 state.brightness = brightness.into_iter().collect();
+                state.brightness_errors = brightness_errors.into_iter().collect();
                 state.selected = state.selected.min(state.monitors.len().saturating_sub(1));
                 state.message = message;
+                state.loading = false;
             }
             UiMessage::Updated {
                 bus,
@@ -261,9 +293,14 @@ fn handle_messages(state: &mut TuiState, rx: &Receiver<UiMessage>) {
                 message,
             } => {
                 state.brightness.insert(bus, brightness);
+                state.brightness_errors.remove(&bus);
                 state.message = message;
+                state.loading = false;
             }
-            UiMessage::Error(message) => state.message = message,
+            UiMessage::Error(message) => {
+                state.message = message;
+                state.loading = false;
+            }
         }
     }
 }
@@ -273,6 +310,7 @@ fn request_refresh(app: App, tx: Sender<UiMessage>) {
         Ok(monitors) => {
             let mut rows = Vec::new();
             let mut brightness = Vec::new();
+            let mut brightness_errors = Vec::new();
             for monitor in monitors {
                 let bus = monitor.id.i2c_bus;
                 rows.push(MonitorRow {
@@ -280,13 +318,15 @@ fn request_refresh(app: App, tx: Sender<UiMessage>) {
                     label: app.display_label(&monitor),
                     serial: monitor.serial.clone(),
                 });
-                if let Ok(raw) = app.get_monitor_brightness(&monitor) {
-                    brightness.push((bus, raw));
+                match app.get_monitor_brightness(&monitor) {
+                    Ok(raw) => brightness.push((bus, raw)),
+                    Err(error) => brightness_errors.push((bus, error.to_string())),
                 }
             }
             let _ = tx.send(UiMessage::Refreshed {
                 monitors: rows,
                 brightness,
+                brightness_errors,
                 message: "Refreshed monitor list".into(),
             });
         }
@@ -296,7 +336,7 @@ fn request_refresh(app: App, tx: Sender<UiMessage>) {
     });
 }
 
-fn request_adjust(app: App, tx: Sender<UiMessage>, state: &TuiState, delta: i16) {
+fn request_adjust(app: App, tx: Sender<UiMessage>, state: &mut TuiState, delta: i16) {
     let Some(row) = state.selected_monitor().cloned() else {
         return;
     };
@@ -305,16 +345,21 @@ fn request_adjust(app: App, tx: Sender<UiMessage>, state: &TuiState, delta: i16)
         .get(&row.id.i2c_bus)
         .copied()
         .map(|raw| raw.to_percent())
-        .unwrap_or(BrightnessPercent::new(50).unwrap());
+        .or_else(|| app.last_brightness_for_bus(row.id.i2c_bus))
+        .unwrap_or_else(default_percent);
     let target = current.saturating_add(delta);
+    state.loading = true;
+    state.message = format!("Setting {} to {}%...", row.label, target.value());
     request_update_bus(app, tx, row.id.i2c_bus, target);
 }
 
-fn request_set(app: App, tx: Sender<UiMessage>, state: &TuiState, value: u8) {
+fn request_set(app: App, tx: Sender<UiMessage>, state: &mut TuiState, value: u8) {
     let Some(row) = state.selected_monitor().cloned() else {
         return;
     };
     if let Ok(target) = BrightnessPercent::new(value) {
+        state.loading = true;
+        state.message = format!("Setting {} to {}%...", row.label, target.value());
         request_update_bus(app, tx, row.id.i2c_bus, target);
     }
 }
@@ -346,4 +391,11 @@ fn update_monitor_by_bus(
         .ok_or_else(|| XtmonctlError::MonitorNotFound(format!("i2c-{bus}")))?;
     let raw = app.set_monitor_brightness(&monitor, target)?;
     Ok((monitor, raw))
+}
+
+fn default_percent() -> BrightnessPercent {
+    match BrightnessPercent::new(5) {
+        Ok(percent) => percent,
+        Err(_) => unreachable!("built-in default percent is valid"),
+    }
 }
