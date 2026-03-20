@@ -9,6 +9,8 @@ External monitor brightness control for Linux via `ddcutil`.
 - Multi-monitor support
 - YAML configuration
 - Honest brightness percentages for monitors whose raw max is not `100`
+- Alias-aware monitor lookup through config entries
+- Visible error reporting in the TUI during refresh and brightness changes
 
 ## Installation
 
@@ -22,6 +24,7 @@ External monitor brightness control for Linux via `ddcutil`.
 xtmonctl
 xtmonctl list
 xtmonctl get 1
+xtmonctl get "Main Monitor"
 xtmonctl set 1 70
 xtmonctl set 1 +10
 xtmonctl all 40

@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 
 use crate::app::App;
 use crate::error::Result;
-use crate::units::BrightnessPercent;
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -81,7 +80,7 @@ fn get_brightness(app: &App, identifier: &str) -> Result<()> {
 fn set_brightness(app: &App, identifier: &str, value: &str) -> Result<()> {
     let monitors = app.list_monitors()?;
     let monitor = app.find_monitor(&monitors, identifier)?;
-    let target = parse_target_percent(app, monitor, value)?;
+    let target = app.resolve_target_percent(monitor, value)?;
     app.set_monitor_brightness(monitor, target)?;
     println!(
         "Set {} brightness to {}%",
@@ -92,36 +91,15 @@ fn set_brightness(app: &App, identifier: &str, value: &str) -> Result<()> {
 }
 
 fn set_all_brightness(app: &App, value: &str) -> Result<()> {
-    let monitors = app.list_monitors()?;
-    if monitors.is_empty() {
+    let results = app.set_all_from_value(value)?;
+    if results.is_empty() {
         println!("No external monitors detected.");
         return Ok(());
     }
 
-    for monitor in &monitors {
-        let target = parse_target_percent(app, monitor, value)?;
-        app.set_monitor_brightness(monitor, target)?;
-        println!("Set {} to {}%", app.display_label(monitor), target.value());
+    for (monitor, _raw, target) in results {
+        println!("Set {} to {}%", app.display_label(&monitor), target.value());
     }
 
     Ok(())
-}
-
-fn parse_target_percent(
-    app: &App,
-    monitor: &crate::ddc::MonitorInfo,
-    value: &str,
-) -> Result<BrightnessPercent> {
-    if value.starts_with('+') || value.starts_with('-') {
-        let delta = value
-            .parse::<i16>()
-            .map_err(|_| crate::error::XtmonctlError::InvalidBrightness(value.to_string()))?;
-        let current = app.get_monitor_brightness(monitor)?.to_percent();
-        Ok(current.saturating_add(delta))
-    } else {
-        let percent = value
-            .parse::<u8>()
-            .map_err(|_| crate::error::XtmonctlError::InvalidBrightness(value.to_string()))?;
-        BrightnessPercent::new(percent)
-    }
 }
