@@ -12,11 +12,16 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 AUTO_YES=false
+FROM_RELEASE=false
+REPO_SLUG="${REPO_SLUG:-ThorOdinson246/xmonctl-rs}"
 
 for arg in "$@"; do
     case "$arg" in
         --yes|-y)
             AUTO_YES=true
+            ;;
+        --from-release)
+            FROM_RELEASE=true
             ;;
     esac
 done
@@ -99,7 +104,38 @@ EOF
 
 install_xtmonctl() {
     . "$HOME/.cargo/env"
-    cargo install --path .
+    if [ "$FROM_RELEASE" = true ]; then
+        install_release_binary
+    else
+        cargo install --path .
+    fi
+}
+
+install_release_binary() {
+    local arch="x86_64-unknown-linux-gnu"
+    local url
+    url="$(curl -fsSL "https://api.github.com/repos/${REPO_SLUG}/releases/latest" | python3 - <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+for asset in data.get("assets", []):
+    if asset.get("name", "").endswith("x86_64-unknown-linux-gnu.tar.gz"):
+        print(asset["browser_download_url"])
+        break
+PY
+)"
+
+    if [ -z "$url" ]; then
+        log_warn "No release artifact found for ${arch}. Falling back to cargo install."
+        cargo install --path .
+        return 0
+    fi
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    curl -fsSL "$url" -o "${temp_dir}/xtmonctl.tar.gz"
+    tar -xzf "${temp_dir}/xtmonctl.tar.gz" -C "${temp_dir}"
+    install -Dm755 "${temp_dir}/xtmonctl" "$HOME/.local/bin/xtmonctl"
+    log_success "Installed xtmonctl to $HOME/.local/bin/xtmonctl"
 }
 
 main() {
@@ -123,6 +159,7 @@ main() {
     echo "  xtmonctl"
     echo "  xtmonctl list"
     echo "  xtmonctl set 1 70"
+    echo "  ./scripts/install.sh --from-release"
 }
 
 main "$@"

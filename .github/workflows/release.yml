@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --release
+      - name: Package artifact
+        run: |
+          cp target/release/xtmonctl xtmonctl
+          tar -czf xtmonctl-x86_64-unknown-linux-gnu.tar.gz xtmonctl
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: xtmonctl-x86_64-unknown-linux-gnu.tar.gz
