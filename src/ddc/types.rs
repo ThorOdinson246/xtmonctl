@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct MonitorId {
     pub display_number: u32,
     pub i2c_bus: u32,
@@ -10,7 +12,7 @@ impl MonitorId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ConnectorType {
     Hdmi,
     DisplayPort,
@@ -19,7 +21,7 @@ pub enum ConnectorType {
     Vga,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MonitorInfo {
     pub id: MonitorId,
     pub manufacturer: String,

@@ -1,6 +1,8 @@
+use serde::Serialize;
+
 use crate::error::{Result, XtmonctlError};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BrightnessPercent(u8);
 
 impl BrightnessPercent {
@@ -30,7 +32,7 @@ impl BrightnessPercent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BrightnessRaw {
     pub value: u16,
     pub max: u16,
