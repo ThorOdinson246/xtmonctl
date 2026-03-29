@@ -24,9 +24,12 @@ impl Default for App {
 
 impl App {
     pub fn load() -> Result<Self> {
-        let path = crate::config::config_path();
-        let config = Config::load_from_path(&path)?;
-        Ok(Self::from_config(config, path))
+        Self::load_with_path(crate::config::config_path())
+    }
+
+    pub fn load_with_path(config_path: PathBuf) -> Result<Self> {
+        let config = Config::load_from_path(&config_path)?;
+        Ok(Self::from_config(config, config_path))
     }
 
     fn from_config(config: Config, config_path: PathBuf) -> Self {
@@ -160,6 +163,31 @@ impl App {
 
     pub fn config_path(&self) -> &Path {
         &self.config_path
+    }
+
+    pub fn list_aliases(&self) -> Vec<(String, String)> {
+        self.config
+            .lock()
+            .map(|config| {
+                config
+                    .aliases()
+                    .map(|(bus, alias)| (bus.to_string(), alias.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn set_monitor_alias(&self, monitor: &MonitorInfo, alias: impl Into<String>) -> Result<()> {
+        let mut config = self.config_lock()?;
+        config.set_alias(&monitor.id.bus_name(), alias.into());
+        config.save_to_path(&self.config_path)
+    }
+
+    pub fn clear_monitor_alias(&self, monitor: &MonitorInfo) -> Result<bool> {
+        let mut config = self.config_lock()?;
+        let removed = config.clear_alias(&monitor.id.bus_name());
+        config.save_to_path(&self.config_path)?;
+        Ok(removed)
     }
 
     fn config_lock(&self) -> Result<std::sync::MutexGuard<'_, Config>> {

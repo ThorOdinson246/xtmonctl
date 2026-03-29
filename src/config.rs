@@ -113,6 +113,29 @@ impl Config {
             });
         entry.last_brightness_percent = Some(percent);
     }
+
+    pub fn set_alias(&mut self, bus_name: &str, alias: String) {
+        let entry = self
+            .monitors
+            .entry(bus_name.to_string())
+            .or_insert(MonitorConfig {
+                alias: None,
+                last_brightness_percent: None,
+            });
+        entry.alias = Some(alias);
+    }
+
+    pub fn clear_alias(&mut self, bus_name: &str) -> bool {
+        if let Some(entry) = self.monitors.get_mut(bus_name) {
+            let had_alias = entry.alias.take().is_some();
+            if entry.alias.is_none() && entry.last_brightness_percent.is_none() {
+                self.monitors.remove(bus_name);
+            }
+            had_alias
+        } else {
+            false
+        }
+    }
 }
 
 pub fn config_dir() -> PathBuf {
