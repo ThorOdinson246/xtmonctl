@@ -62,3 +62,21 @@ fn display_label_prefers_alias_from_config() {
         Some(61)
     );
 }
+
+#[test]
+fn custom_config_path_is_loaded() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("custom-config.yaml");
+
+    let config = Config {
+        default_step_percent: 7,
+        large_step_percent: 14,
+        ..Config::default()
+    };
+    config.save_to_path(&path).unwrap();
+
+    let app = App::load_with_path(path.clone()).unwrap();
+    assert_eq!(app.default_step_percent(), 7);
+    assert_eq!(app.large_step_percent(), 14);
+    assert_eq!(app.config_path(), path.as_path());
+}
