@@ -13,7 +13,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap};
 use ratatui::Terminal;
 
 use crate::app::App;
@@ -53,14 +53,19 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
         terminal
             .draw(|frame| {
                 let theme = state.theme.palette();
-                let help_height = if state.show_help { 8 } else { 5 };
+                let footer_height = if state.command_mode {
+                    7
+                } else if state.active_panel.is_some() {
+                    8
+                } else {
+                    1
+                };
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
                         Constraint::Length(3),
                         Constraint::Min(10),
-                        Constraint::Length(7),
-                        Constraint::Length(help_height),
+                        Constraint::Length(footer_height),
                     ])
                     .split(frame.area());
 
@@ -137,25 +142,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                 };
                 frame.render_widget(gauge, detail_chunks[1]);
 
-                render_legend(frame, chunks[2], &state, theme);
-
-                let controls = Paragraph::new(state.help_lines())
-                    .block(
-                        Block::default()
-                            .title(if state.show_help {
-                                " Controls and Help "
-                            } else {
-                                " Controls "
-                            })
-                            .borders(Borders::ALL)
-                            .border_style(state.status_style()),
-                    )
-                    .wrap(Wrap { trim: true });
-                frame.render_widget(controls, chunks[3]);
-
-                if state.show_help {
-                    render_help_overlay(frame, &state, theme);
-                }
+                render_footer(frame, chunks[2], &state, theme);
             })
             .map_err(io_error)?;
 
@@ -167,9 +154,31 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                 continue;
             }
 
+            if state.command_mode {
+                match key.code {
+                    KeyCode::Esc => state.close_command_palette(),
+                    KeyCode::Enter => state.run_command(app),
+                    KeyCode::Up => state.move_command_selection(-1),
+                    KeyCode::Down => state.move_command_selection(1),
+                    KeyCode::Backspace => {
+                        state.command_input.pop();
+                        state.command_selected = 0;
+                    }
+                    KeyCode::Char(ch) => {
+                        state.command_input.push(ch);
+                        state.command_selected = 0;
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
             match key.code {
                 KeyCode::Char('q') => return Ok(()),
-                KeyCode::Char('?') => state.show_help = !state.show_help,
+                KeyCode::Esc => state.active_panel = None,
+                KeyCode::Char('?') => state.active_panel = Some(BottomPanel::Help),
+                KeyCode::Char('/') => state.open_command_palette_with_slash(),
+                KeyCode::Tab => state.open_command_palette(),
                 KeyCode::Char('t') => cycle_theme(app, &mut state),
                 KeyCode::Char('r') => {
                     state.loading = true;
@@ -242,10 +251,14 @@ struct TuiState {
     brightness_errors: HashMap<u32, String>,
     selected: usize,
     message: String,
-    show_help: bool,
     loading: bool,
     generation: u64,
     theme: ThemeKind,
+    active_panel: Option<BottomPanel>,
+    command_mode: bool,
+    command_input: String,
+    command_selected: usize,
+    command_scroll: usize,
 }
 
 impl Default for TuiState {
@@ -256,10 +269,14 @@ impl Default for TuiState {
             brightness_errors: HashMap::new(),
             selected: 0,
             message: String::new(),
-            show_help: false,
             loading: false,
             generation: 0,
             theme: ThemeKind::Ocean,
+            active_panel: None,
+            command_mode: false,
+            command_input: String::new(),
+            command_selected: 0,
+            command_scroll: 0,
         }
     }
 }
@@ -299,36 +316,84 @@ impl TuiState {
         }
     }
 
-    fn help_lines(&self) -> Vec<Line<'static>> {
-        let status = if self.message.is_empty() {
-            "Ready".to_string()
+    fn active_panel_style(&self) -> Style {
+        if self.active_panel == Some(BottomPanel::Status) {
+            self.status_style()
         } else {
-            self.message.clone()
-        };
-
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Status: ",
-                    Style::default()
-                        .fg(self.theme.palette().accent.fg.unwrap_or(Color::Cyan))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(status),
-            ]),
-            Line::from(primary_controls_text()),
-            Line::from(secondary_controls_text()),
-            Line::from(feature_summary_text()),
-        ];
-
-        if self.show_help {
-            lines.push(Line::from(" "));
-            lines.extend(expanded_help_lines());
-        } else {
-            lines.push(Line::from("Press ? to expand the full help overlay."));
+            self.theme.palette().border
         }
+    }
 
-        lines
+    fn open_command_palette(&mut self) {
+        self.command_mode = true;
+        if self.command_input.is_empty() {
+            self.command_input.push('/');
+        }
+        self.command_selected = 0;
+        self.command_scroll = 0;
+    }
+
+    fn open_command_palette_with_slash(&mut self) {
+        self.command_mode = true;
+        self.command_input.clear();
+        self.command_input.push('/');
+        self.command_selected = 0;
+        self.command_scroll = 0;
+    }
+
+    fn close_command_palette(&mut self) {
+        self.command_mode = false;
+        self.command_input.clear();
+        self.command_selected = 0;
+        self.command_scroll = 0;
+    }
+
+    fn move_command_selection(&mut self, delta: isize) {
+        let options = filtered_palette_commands(&self.command_input);
+        if options.is_empty() {
+            self.command_selected = 0;
+            self.command_scroll = 0;
+            return;
+        }
+        let len = options.len() as isize;
+        let next = (self.command_selected as isize + delta).rem_euclid(len);
+        self.command_selected = next as usize;
+        self.adjust_command_scroll(options.len());
+    }
+
+    fn adjust_command_scroll(&mut self, total: usize) {
+        let visible = 5usize;
+        if total <= visible {
+            self.command_scroll = 0;
+            return;
+        }
+        if self.command_selected < self.command_scroll {
+            self.command_scroll = self.command_selected;
+        } else if self.command_selected >= self.command_scroll + visible {
+            self.command_scroll = self.command_selected + 1 - visible;
+        }
+    }
+
+    fn run_command(&mut self, app: &App) {
+        match selected_palette_command(&self.command_input, self.command_selected) {
+            Ok(PaletteCommand::Show(panel)) => {
+                self.active_panel = Some(panel);
+                self.message = format!("Opened {}", panel.title().trim());
+            }
+            Ok(PaletteCommand::Hide) => {
+                self.active_panel = None;
+                self.message = "Closed bottom panel".into();
+            }
+            Ok(PaletteCommand::ThemeNext) => {
+                self.theme = self.theme.next();
+                self.message = format!("Theme switched to {}", self.theme.display_name());
+                let _ = app.set_tui_theme(self.theme.config_name());
+            }
+            Err(message) => {
+                self.message = message;
+            }
+        }
+        self.close_command_palette();
     }
 }
 
@@ -350,6 +415,32 @@ enum UiMessage {
         generation: u64,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BottomPanel {
+    Status,
+    Controls,
+    Presets,
+    Help,
+}
+
+impl BottomPanel {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Status => " Status ",
+            Self::Controls => " Controls ",
+            Self::Presets => " Presets ",
+            Self::Help => " Help ",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PaletteCommand {
+    Show(BottomPanel),
+    Hide,
+    ThemeNext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,35 +566,60 @@ struct Palette {
     error: Style,
 }
 
+#[derive(Clone, Copy)]
+struct PaletteCommandSpec {
+    command: &'static str,
+    description: &'static str,
+    action: PaletteCommand,
+}
+
 fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState, theme: Palette) {
+    let width = area.width as usize;
+    let left_text = if width < 80 {
+        " xtmonctl ".to_string()
+    } else {
+        " xtmonctl  external monitor control".to_string()
+    };
+    let center_text = if width < 60 {
+        format!("{} ", state.theme.display_name())
+    } else {
+        format!(" Theme: {} ", state.theme.display_name())
+    };
+    let right_text = if width < 72 {
+        format!(
+            "{} monitor{}",
+            state.monitors.len(),
+            if state.monitors.len() == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "Tab command  ? help  t theme  Monitors: {}",
+            state.monitors.len()
+        )
+    };
+
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(42),
-            Constraint::Percentage(33),
-            Constraint::Percentage(25),
+            Constraint::Percentage(45),
+            Constraint::Percentage(20),
+            Constraint::Percentage(35),
         ])
         .split(area);
 
-    let left = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " xtmonctl ",
-            Style::default()
-                .fg(theme.header_fg)
-                .bg(theme.header_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            " external monitor control",
-            Style::default().fg(theme.header_fg).bg(theme.header_bg),
-        ),
-    ]))
+    let left = Paragraph::new(Line::from(vec![Span::styled(
+        left_text,
+        Style::default()
+            .fg(theme.header_fg)
+            .bg(theme.header_bg)
+            .add_modifier(Modifier::BOLD),
+    )]))
     .alignment(Alignment::Left)
     .block(Block::default().style(Style::default().bg(theme.header_bg)));
     frame.render_widget(left, header_chunks[0]);
 
     let center = Paragraph::new(Line::from(vec![Span::styled(
-        format!(" Theme: {} ", state.theme.display_name()),
+        center_text,
         Style::default()
             .fg(theme.header_fg)
             .bg(theme.header_bg)
@@ -514,87 +630,15 @@ fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState, t
     frame.render_widget(center, header_chunks[1]);
 
     let right = Paragraph::new(Line::from(vec![Span::styled(
-        format!(" Monitors: {} ", state.monitors.len()),
-        Style::default().fg(theme.header_fg).bg(theme.header_bg),
+        right_text,
+        Style::default()
+            .fg(theme.header_fg)
+            .bg(theme.header_bg)
+            .add_modifier(Modifier::DIM),
     )]))
     .alignment(Alignment::Right)
     .block(Block::default().style(Style::default().bg(theme.header_bg)));
     frame.render_widget(right, header_chunks[2]);
-}
-
-fn render_legend(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState, theme: Palette) {
-    let legend_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-        ])
-        .split(area);
-
-    let status = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("Status ", theme.accent.add_modifier(Modifier::BOLD)),
-            Span::raw(if state.message.is_empty() {
-                "Ready".to_string()
-            } else {
-                state.message.clone()
-            }),
-        ]),
-        Line::from("r rescans monitors and reloads brightness"),
-        Line::from("t cycles saved themes inside the TUI"),
-    ])
-    .block(panel_block(" Status ", theme))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(status, legend_chunks[0]);
-
-    let controls = Paragraph::new(vec![
-        Line::from("Select: j/k or Up/Down"),
-        Line::from("Adjust: h/l or Left/Right"),
-        Line::from("Large step: H/L"),
-    ])
-    .block(panel_block(" Controls ", theme))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(controls, legend_chunks[1]);
-
-    let presets = Paragraph::new(vec![
-        Line::from("Presets: 1-9 => 10%-90%"),
-        Line::from("0 => 100%"),
-        Line::from("?: full help    q: quit"),
-    ])
-    .block(panel_block(" Presets ", theme))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(presets, legend_chunks[2]);
-}
-
-fn render_help_overlay(frame: &mut ratatui::Frame<'_>, state: &TuiState, theme: Palette) {
-    let overlay = centered_rect(72, 55, frame.area());
-    let lines = vec![
-        Line::from(vec![Span::styled(
-            "xtmonctl TUI",
-            theme.accent.add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from("Use j/k or the arrow keys to move between monitors."),
-        Line::from("Use h/l for normal brightness steps and H/L for larger jumps."),
-        Line::from("Use 0-9 for instant presets on the selected monitor."),
-        Line::from("Use t to cycle themes. The selected theme is saved to the config file."),
-        Line::from("Use r when you want a full rescan of connected monitors."),
-        Line::from(""),
-        Line::from(format!("Current theme: {}", state.theme.display_name())),
-        Line::from(
-            "This interface shows aliases, connector details, and honest raw brightness values.",
-        ),
-        Line::from(""),
-        Line::from("Press ? again to close this overlay."),
-    ];
-
-    frame.render_widget(Clear, overlay);
-    let overlay_widget = Paragraph::new(lines)
-        .block(panel_block(" Help ", theme))
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true });
-    frame.render_widget(overlay_widget, overlay);
 }
 
 fn panel_block<'a>(title: &'a str, theme: Palette) -> Block<'a> {
@@ -602,6 +646,44 @@ fn panel_block<'a>(title: &'a str, theme: Palette) -> Block<'a> {
         .title(title)
         .borders(Borders::ALL)
         .border_style(theme.border)
+}
+
+fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState, theme: Palette) {
+    if state.command_mode {
+        let command = Paragraph::new(command_palette_lines(
+            &state.command_input,
+            state.command_selected,
+            state.command_scroll,
+            theme,
+        ))
+        .block(
+            Block::default()
+                .title(" Command ")
+                .borders(Borders::ALL)
+                .border_style(theme.accent),
+        )
+        .wrap(Wrap { trim: true });
+        frame.render_widget(command, area);
+        return;
+    }
+
+    if let Some(panel) = state.active_panel {
+        let panel_widget = Paragraph::new(panel_lines(state, panel))
+            .block(
+                Block::default()
+                    .title(panel.title())
+                    .borders(Borders::ALL)
+                    .border_style(state.active_panel_style()),
+            )
+            .wrap(Wrap { trim: true });
+        frame.render_widget(panel_widget, area);
+        return;
+    }
+
+    let hint = Paragraph::new(vec![footer_hint_line(theme)])
+        .alignment(Alignment::Left)
+        .block(Block::default().border_style(theme.border));
+    frame.render_widget(hint, area);
 }
 
 fn selected_detail(state: &TuiState) -> String {
@@ -791,6 +873,122 @@ fn selection_marker(selected: bool) -> &'static str {
     }
 }
 
+fn footer_hint_line(theme: Palette) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        "Tab opens command palette. Try /status, /controls, /presets, /help, /hide, /theme.",
+        theme.muted_text.add_modifier(Modifier::DIM),
+    )])
+}
+
+fn command_palette_lines(
+    input: &str,
+    selected: usize,
+    scroll: usize,
+    theme: Palette,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("> ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(input.to_string()),
+        ]),
+        Line::from("Type a slash command. Up/Down selects, Enter runs, Esc closes."),
+    ];
+
+    let matches = filtered_palette_commands(input);
+    if matches.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "No matching commands",
+            theme.muted_text,
+        )]));
+        return lines;
+    }
+
+    let visible = 5usize;
+    let start = scroll.min(matches.len().saturating_sub(1));
+    let end = (start + visible).min(matches.len());
+
+    for (index, spec) in matches.iter().enumerate().skip(start).take(end - start) {
+        let is_selected = index == selected.min(matches.len().saturating_sub(1));
+        let command_style = if is_selected {
+            theme.selected_line
+        } else {
+            theme.primary_text
+        };
+        let description_style = if is_selected {
+            theme.selected_meta
+        } else {
+            theme.muted_text
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", selection_marker(is_selected)), command_style),
+            Span::styled(spec.command, command_style.add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(spec.description, description_style),
+        ]));
+    }
+
+    if matches.len() > end {
+        lines.push(Line::from(vec![Span::styled(
+            format!("... {} more command(s)", matches.len() - end),
+            theme.muted_text.add_modifier(Modifier::DIM),
+        )]));
+    }
+
+    lines
+}
+
+fn panel_lines(state: &TuiState, panel: BottomPanel) -> Vec<Line<'static>> {
+    match panel {
+        BottomPanel::Status => status_panel_lines(state),
+        BottomPanel::Controls => controls_panel_lines(),
+        BottomPanel::Presets => preset_panel_lines(),
+        BottomPanel::Help => help_panel_lines(),
+    }
+}
+
+fn status_panel_lines(state: &TuiState) -> Vec<Line<'static>> {
+    vec![
+        Line::from(vec![
+            Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(if state.message.is_empty() {
+                "Ready".to_string()
+            } else {
+                state.message.clone()
+            }),
+        ]),
+        Line::from("r rescans monitors and reloads brightness from ddcutil."),
+        Line::from("t changes the TUI theme and saves it to your config."),
+        Line::from(feature_summary_text()),
+    ]
+}
+
+fn controls_panel_lines() -> Vec<Line<'static>> {
+    vec![
+        Line::from(primary_controls_text()),
+        Line::from(secondary_controls_text()),
+        Line::from("Tab switches bottom panels. ? jumps straight to Help."),
+        Line::from("q quits the TUI."),
+    ]
+}
+
+fn preset_panel_lines() -> Vec<Line<'static>> {
+    vec![
+        Line::from("Presets: 1-9 => 10% through 90%"),
+        Line::from("0 sets 100% on the selected monitor"),
+        Line::from("h/l uses normal step size from config"),
+        Line::from("H/L uses large step size from config"),
+    ]
+}
+
+fn help_panel_lines() -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from("Use j/k or the arrow keys to move between monitors."),
+        Line::from("Use h/l for normal brightness steps and H/L for larger jumps."),
+    ];
+    lines.extend(expanded_help_lines());
+    lines
+}
+
 fn primary_controls_text() -> &'static str {
     "Move: j/k or Up/Down    Adjust: h/l or Left/Right"
 }
@@ -816,29 +1014,83 @@ fn expanded_help_lines() -> Vec<Line<'static>> {
     ]
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
+fn palette_commands() -> &'static [PaletteCommandSpec] {
+    &[
+        PaletteCommandSpec {
+            command: "/status",
+            description: "Show current status and recent activity",
+            action: PaletteCommand::Show(BottomPanel::Status),
+        },
+        PaletteCommandSpec {
+            command: "/controls",
+            description: "Show movement and brightness shortcuts",
+            action: PaletteCommand::Show(BottomPanel::Controls),
+        },
+        PaletteCommandSpec {
+            command: "/presets",
+            description: "Show preset brightness shortcuts",
+            action: PaletteCommand::Show(BottomPanel::Presets),
+        },
+        PaletteCommandSpec {
+            command: "/help",
+            description: "Show the full help panel",
+            action: PaletteCommand::Show(BottomPanel::Help),
+        },
+        PaletteCommandSpec {
+            command: "/theme",
+            description: "Cycle to the next theme",
+            action: PaletteCommand::ThemeNext,
+        },
+        PaletteCommandSpec {
+            command: "/hide",
+            description: "Hide the bottom panel",
+            action: PaletteCommand::Hide,
+        },
+    ]
+}
 
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+fn filtered_palette_commands(input: &str) -> Vec<PaletteCommandSpec> {
+    let query = input.trim().to_ascii_lowercase();
+    if query.is_empty() || query == "/" {
+        return palette_commands().to_vec();
+    }
+
+    palette_commands()
+        .iter()
+        .copied()
+        .filter(|spec| {
+            spec.command.starts_with(&query)
+                || spec
+                    .description
+                    .to_ascii_lowercase()
+                    .contains(query.trim_start_matches('/'))
+        })
+        .collect()
+}
+
+fn selected_palette_command(
+    input: &str,
+    selected: usize,
+) -> std::result::Result<PaletteCommand, String> {
+    let matches = filtered_palette_commands(input);
+    if matches.is_empty() {
+        let trimmed = input.trim();
+        if trimmed.is_empty() || trimmed == "/" {
+            return Err("Type a slash command like /status or /help".into());
+        }
+        return Err(format!("Unknown command: {trimmed}"));
+    }
+
+    let index = selected.min(matches.len().saturating_sub(1));
+    Ok(matches[index].action)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_messages, MonitorRow, ThemeKind, TuiState, UiMessage};
+    use super::{
+        filtered_palette_commands, handle_messages, selected_palette_command, BottomPanel,
+        MonitorRow, PaletteCommand, ThemeKind, TuiState, UiMessage,
+    };
     use crate::ddc::{MonitorId, MonitorInfo};
     use crate::units::BrightnessRaw;
     use std::sync::mpsc;
@@ -912,5 +1164,36 @@ mod tests {
         assert_eq!(ThemeKind::Ocean.next(), ThemeKind::Forest);
         assert_eq!(ThemeKind::Forest.next(), ThemeKind::Ember);
         assert_eq!(ThemeKind::Ember.next(), ThemeKind::Ocean);
+    }
+
+    #[test]
+    fn bottom_panel_cycles_in_expected_order() {
+        assert!(matches!(
+            selected_palette_command("/status", 0),
+            Ok(PaletteCommand::Show(BottomPanel::Status))
+        ));
+        assert!(matches!(
+            selected_palette_command("/controls", 0),
+            Ok(PaletteCommand::Show(BottomPanel::Controls))
+        ));
+        assert!(matches!(
+            selected_palette_command("/presets", 0),
+            Ok(PaletteCommand::Show(BottomPanel::Presets))
+        ));
+        assert!(matches!(
+            selected_palette_command("/help", 0),
+            Ok(PaletteCommand::Show(BottomPanel::Help))
+        ));
+    }
+
+    #[test]
+    fn slash_shows_all_commands() {
+        assert!(filtered_palette_commands("/").len() >= 6);
+    }
+
+    #[test]
+    fn prefix_filters_theme_command() {
+        let matches = filtered_palette_commands("/t");
+        assert!(matches.iter().any(|spec| spec.command == "/theme"));
     }
 }
