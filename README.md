@@ -4,6 +4,10 @@
 
 It is aimed at people who live in the terminal and want a straightforward way to manage monitor brightness without opening a desktop settings panel every time. The most natural audience is Arch Linux, Debian, Ubuntu, Fedora, and similar desktop users who already install command-line tools, use external monitors, and are comfortable with package-manager setup steps when hardware access is involved.
 
+## Screenshot
+
+![xtmonctl TUI](assets/screenshots/xtmonctl-tui.png)
+
 ## What It Is Good For
 
 - External monitor brightness control from the terminal
@@ -51,12 +55,14 @@ Not currently targeted:
 ## Features
 
 - Interactive TUI
+- Slash-command palette inside the TUI
 - Scriptable CLI
 - Multi-monitor support
 - Honest percentage reporting when the monitor max is not `100`
 - Alias-aware monitor lookup
 - YAML configuration
 - JSON output for scripting
+- In-app theme switching
 - Release binaries for direct installation
 
 ## Installation
@@ -161,6 +167,18 @@ The installer script helps configure these, but the exact setup depends on your 
 ```bash
 xtmonctl
 ```
+
+### TUI Highlights
+
+- `j` / `k` or arrow keys move between monitors
+- `h` / `l` adjust brightness by the configured step size
+- `H` / `L` use the larger configured step size
+- `0-9` apply preset brightness levels
+- `t` cycles themes
+- `r` refreshes monitor detection and brightness reads
+- `Tab` opens the command palette
+- `/status`, `/controls`, `/presets`, `/help`, `/theme`, `/hide` are available in the palette
+- Short aliases like `/s`, `/c`, `/p`, `/h`, `/t`, and `/x` work too
 
 ### CLI Commands
 
