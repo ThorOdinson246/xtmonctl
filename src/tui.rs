@@ -54,7 +54,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
             .draw(|frame| {
                 let theme = state.theme.palette();
                 let footer_height = if state.command_mode {
-                    7
+                    10
                 } else if state.active_panel.is_some() {
                     8
                 } else {
@@ -158,15 +158,22 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &App) ->
                 match key.code {
                     KeyCode::Esc => state.close_command_palette(),
                     KeyCode::Enter => state.run_command(app),
+                    KeyCode::Tab => state.autocomplete_command(),
                     KeyCode::Up => state.move_command_selection(-1),
                     KeyCode::Down => state.move_command_selection(1),
                     KeyCode::Backspace => {
                         state.command_input.pop();
                         state.command_selected = 0;
+                        state.adjust_command_scroll(
+                            filtered_palette_commands(&state.command_input).len(),
+                        );
                     }
                     KeyCode::Char(ch) => {
                         state.command_input.push(ch);
                         state.command_selected = 0;
+                        state.adjust_command_scroll(
+                            filtered_palette_commands(&state.command_input).len(),
+                        );
                     }
                     _ => {}
                 }
@@ -346,6 +353,17 @@ impl TuiState {
         self.command_input.clear();
         self.command_selected = 0;
         self.command_scroll = 0;
+    }
+
+    fn autocomplete_command(&mut self) {
+        let options = filtered_palette_commands(&self.command_input);
+        if options.is_empty() {
+            return;
+        }
+        let index = self.command_selected.min(options.len().saturating_sub(1));
+        self.command_input = options[index].command.to_string();
+        self.command_selected = index;
+        self.adjust_command_scroll(options.len());
     }
 
     fn move_command_selection(&mut self, delta: isize) {
@@ -569,6 +587,7 @@ struct Palette {
 #[derive(Clone, Copy)]
 struct PaletteCommandSpec {
     command: &'static str,
+    aliases: &'static [&'static str],
     description: &'static str,
     action: PaletteCommand,
 }
@@ -886,15 +905,18 @@ fn command_palette_lines(
     scroll: usize,
     theme: Palette,
 ) -> Vec<Line<'static>> {
+    let matches = filtered_palette_commands(input);
+    let selected_spec = matches
+        .get(selected.min(matches.len().saturating_sub(1)))
+        .copied();
     let mut lines = vec![
         Line::from(vec![
             Span::styled("> ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(input.to_string()),
         ]),
-        Line::from("Type a slash command. Up/Down selects, Enter runs, Esc closes."),
+        Line::from("Type a slash command. Up/Down selects, Tab completes, Enter runs, Esc closes."),
     ];
 
-    let matches = filtered_palette_commands(input);
     if matches.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "No matching commands",
@@ -919,9 +941,15 @@ fn command_palette_lines(
         } else {
             theme.muted_text
         };
+        let alias_suffix = if spec.aliases.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", spec.aliases.join(", "))
+        };
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", selection_marker(is_selected)), command_style),
             Span::styled(spec.command, command_style.add_modifier(Modifier::BOLD)),
+            Span::styled(alias_suffix, theme.muted_text.add_modifier(Modifier::DIM)),
             Span::raw("  "),
             Span::styled(spec.description, description_style),
         ]));
@@ -932,6 +960,19 @@ fn command_palette_lines(
             format!("... {} more command(s)", matches.len() - end),
             theme.muted_text.add_modifier(Modifier::DIM),
         )]));
+    }
+
+    if let Some(spec) = selected_spec {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Selected: ", theme.accent.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                spec.command,
+                theme.primary_text.add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(spec.description, theme.selected_meta),
+        ]));
     }
 
     lines
@@ -1018,31 +1059,37 @@ fn palette_commands() -> &'static [PaletteCommandSpec] {
     &[
         PaletteCommandSpec {
             command: "/status",
+            aliases: &["/s"],
             description: "Show current status and recent activity",
             action: PaletteCommand::Show(BottomPanel::Status),
         },
         PaletteCommandSpec {
             command: "/controls",
+            aliases: &["/c"],
             description: "Show movement and brightness shortcuts",
             action: PaletteCommand::Show(BottomPanel::Controls),
         },
         PaletteCommandSpec {
             command: "/presets",
+            aliases: &["/p"],
             description: "Show preset brightness shortcuts",
             action: PaletteCommand::Show(BottomPanel::Presets),
         },
         PaletteCommandSpec {
             command: "/help",
+            aliases: &["/h"],
             description: "Show the full help panel",
             action: PaletteCommand::Show(BottomPanel::Help),
         },
         PaletteCommandSpec {
             command: "/theme",
+            aliases: &["/t"],
             description: "Cycle to the next theme",
             action: PaletteCommand::ThemeNext,
         },
         PaletteCommandSpec {
             command: "/hide",
+            aliases: &["/x"],
             description: "Hide the bottom panel",
             action: PaletteCommand::Hide,
         },
@@ -1055,17 +1102,29 @@ fn filtered_palette_commands(input: &str) -> Vec<PaletteCommandSpec> {
         return palette_commands().to_vec();
     }
 
-    palette_commands()
+    let mut direct = palette_commands()
         .iter()
         .copied()
         .filter(|spec| {
             spec.command.starts_with(&query)
-                || spec
-                    .description
-                    .to_ascii_lowercase()
-                    .contains(query.trim_start_matches('/'))
+                || spec.aliases.iter().any(|alias| alias.starts_with(&query))
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    let desc_query = query.trim_start_matches('/');
+    let mut descriptive = palette_commands()
+        .iter()
+        .copied()
+        .filter(|spec| {
+            !direct
+                .iter()
+                .any(|existing| existing.command == spec.command)
+                && spec.description.to_ascii_lowercase().contains(desc_query)
+        })
+        .collect::<Vec<_>>();
+
+    direct.append(&mut descriptive);
+    direct
 }
 
 fn selected_palette_command(
@@ -1079,6 +1138,14 @@ fn selected_palette_command(
             return Err("Type a slash command like /status or /help".into());
         }
         return Err(format!("Unknown command: {trimmed}"));
+    }
+
+    let trimmed = input.trim().to_ascii_lowercase();
+    if let Some(exact) = matches
+        .iter()
+        .find(|spec| spec.command == trimmed || spec.aliases.iter().any(|alias| *alias == trimmed))
+    {
+        return Ok(exact.action);
     }
 
     let index = selected.min(matches.len().saturating_sub(1));
@@ -1195,5 +1262,33 @@ mod tests {
     fn prefix_filters_theme_command() {
         let matches = filtered_palette_commands("/t");
         assert!(matches.iter().any(|spec| spec.command == "/theme"));
+    }
+
+    #[test]
+    fn alias_filters_status_command() {
+        let matches = filtered_palette_commands("/s");
+        assert!(matches.iter().any(|spec| spec.command == "/status"));
+    }
+
+    #[test]
+    fn alias_executes_matching_command() {
+        assert!(matches!(
+            selected_palette_command("/c", 0),
+            Ok(PaletteCommand::Show(BottomPanel::Controls))
+        ));
+    }
+
+    #[test]
+    fn tab_completion_uses_selected_command() {
+        let mut state = TuiState {
+            command_mode: true,
+            command_input: "/t".into(),
+            command_selected: 0,
+            ..TuiState::default()
+        };
+
+        state.autocomplete_command();
+
+        assert_eq!(state.command_input, "/theme");
     }
 }
