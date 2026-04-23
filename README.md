@@ -133,7 +133,7 @@ Build a local `.deb` package:
 
 ```bash
 ./packaging/debian/build-deb.sh
-sudo apt install ./xtmonctl_0.1.0_amd64.deb
+sudo apt install ./xtmonctl_0.1.1_amd64.deb
 ```
 
 ### Fedora
@@ -239,7 +239,7 @@ command_timeout_secs: 5
 
 ### GitHub Releases
 
-Pushing a tag like `v0.1.0` triggers the release workflow, which uploads:
+Pushing a tag like `v0.1.1` triggers the release workflow, which uploads:
 
 - `xtmonctl-x86_64-unknown-linux-gnu.tar.gz`
 
@@ -258,7 +258,7 @@ Use:
 
 ```bash
 ./packaging/debian/build-deb.sh
-sudo apt install ./xtmonctl_0.1.0_amd64.deb
+sudo apt install ./xtmonctl_0.1.1_amd64.deb
 ```
 
 ## Troubleshooting

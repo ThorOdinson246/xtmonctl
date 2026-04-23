@@ -114,17 +114,9 @@ install_xtmonctl() {
 install_release_binary() {
     local arch="x86_64-unknown-linux-gnu"
     local url
-    url="$(curl -fsSL "https://api.github.com/repos/${REPO_SLUG}/releases/latest" | python3 - <<'PY'
-import json, sys
-data = json.load(sys.stdin)
-for asset in data.get("assets", []):
-    if asset.get("name", "").endswith("x86_64-unknown-linux-gnu.tar.gz"):
-        print(asset["browser_download_url"])
-        break
-PY
-)"
+    url="https://github.com/${REPO_SLUG}/releases/latest/download/xtmonctl-${arch}.tar.gz"
 
-    if [ -z "$url" ]; then
+    if ! curl -fsI "$url" >/dev/null 2>&1; then
         log_warn "No release artifact found for ${arch}. Falling back to cargo install."
         cargo install --path .
         return 0

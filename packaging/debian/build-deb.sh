@@ -8,14 +8,7 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VERSION="$(python3 - <<'PY'
-from pathlib import Path
-import re
-text = Path('Cargo.toml').read_text()
-match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
-print(match.group(1))
-PY
-)"
+VERSION="$(awk -F'"' '/^version = / { print $2; exit }' "${ROOT_DIR}/Cargo.toml")"
 ARCH="${ARCH:-amd64}"
 PACKAGE_NAME="xtmonctl"
 WORK_DIR="$(mktemp -d)"
