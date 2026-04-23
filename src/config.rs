@@ -24,6 +24,8 @@ pub struct Config {
     pub detection_timeout_secs: u64,
     #[serde(default = "default_command_timeout_secs")]
     pub command_timeout_secs: u64,
+    #[serde(default = "default_tui_theme")]
+    pub tui_theme: String,
 }
 
 impl Default for Config {
@@ -34,6 +36,7 @@ impl Default for Config {
             large_step_percent: default_large_step_percent(),
             detection_timeout_secs: default_detection_timeout_secs(),
             command_timeout_secs: default_command_timeout_secs(),
+            tui_theme: default_tui_theme(),
         }
     }
 }
@@ -136,6 +139,14 @@ impl Config {
             false
         }
     }
+
+    pub fn tui_theme(&self) -> &str {
+        &self.tui_theme
+    }
+
+    pub fn set_tui_theme(&mut self, theme: impl Into<String>) {
+        self.tui_theme = theme.into();
+    }
 }
 
 pub fn config_dir() -> PathBuf {
@@ -169,6 +180,10 @@ const fn default_command_timeout_secs() -> u64 {
     5
 }
 
+fn default_tui_theme() -> String {
+    "ocean".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -181,6 +196,7 @@ mod tests {
         let path = dir.path().join("config.yaml");
         let config = Config::load_from_path(&path).unwrap();
         assert_eq!(config.default_step_percent, 5);
+        assert_eq!(config.tui_theme(), "ocean");
     }
 
     #[test]
@@ -195,10 +211,12 @@ mod tests {
                 last_brightness_percent: Some(42),
             },
         );
+        config.set_tui_theme("forest");
 
         config.save_to_path(&path).unwrap();
         let loaded = Config::load_from_path(&path).unwrap();
         assert_eq!(loaded.alias_for("i2c-4"), Some("Main"));
         assert_eq!(loaded.last_brightness_for("i2c-4"), Some(42));
+        assert_eq!(loaded.tui_theme(), "forest");
     }
 }

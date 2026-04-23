@@ -125,13 +125,6 @@ impl App {
             .and_then(|config| config.alias_for(&monitor.id.bus_name()).map(str::to_string))
     }
 
-    pub fn last_brightness_for(&self, monitor: &MonitorInfo) -> Option<u8> {
-        self.config
-            .lock()
-            .ok()
-            .and_then(|config| config.last_brightness_for(&monitor.id.bus_name()))
-    }
-
     pub fn last_brightness_for_bus(&self, bus: u32) -> Option<BrightnessPercent> {
         self.config
             .lock()
@@ -188,6 +181,19 @@ impl App {
         let removed = config.clear_alias(&monitor.id.bus_name());
         config.save_to_path(&self.config_path)?;
         Ok(removed)
+    }
+
+    pub fn tui_theme(&self) -> String {
+        self.config
+            .lock()
+            .map(|config| config.tui_theme().to_string())
+            .unwrap_or_else(|_| "ocean".to_string())
+    }
+
+    pub fn set_tui_theme(&self, theme: &str) -> Result<()> {
+        let mut config = self.config_lock()?;
+        config.set_tui_theme(theme);
+        config.save_to_path(&self.config_path)
     }
 
     fn config_lock(&self) -> Result<std::sync::MutexGuard<'_, Config>> {
