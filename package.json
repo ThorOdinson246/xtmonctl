@@ -1,6 +1,6 @@
 {
   "name": "xtmonctl",
-  "version": "0.1.1",
+  "version": "1.0.3",
   "description": "External monitor brightness control via ddcutil",
   "bin": {
     "xtmonctl": "bin/xtmonctl"

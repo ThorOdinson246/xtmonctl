@@ -1,6 +1,6 @@
 [package]
 name = "xtmonctl"
-version = "0.1.1"
+version = "1.0.3"
 edition = "2021"
 description = "External monitor brightness control via ddcutil"
 license = "MIT"
