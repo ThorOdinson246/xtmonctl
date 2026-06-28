@@ -1,0 +1,30 @@
+{
+  "name": "xtmonctl",
+  "version": "0.1.1",
+  "description": "External monitor brightness control via ddcutil",
+  "bin": {
+    "xtmonctl": "bin/xtmonctl"
+  },
+  "files": [
+    "bin/xtmonctl"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThorOdinson246/xmonctl-rs.git"
+  },
+  "author": "ThorOdinson246",
+  "license": "MIT",
+  "keywords": [
+    "ddcutil",
+    "monitor",
+    "brightness",
+    "linux",
+    "tui"
+  ]
+}

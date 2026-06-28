@@ -23,3 +23,20 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: xtmonctl-x86_64-unknown-linux-gnu.tar.gz
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Prepare NPM package
+        run: |
+          mkdir -p bin
+          cp target/release/xtmonctl bin/
+      - name: Update package version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          npm version $VERSION --no-git-tag-version
+      - name: Publish to NPM
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
